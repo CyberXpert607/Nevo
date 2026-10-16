@@ -378,6 +378,13 @@ These are ad-hoc panic messages (not part of the `#[contracterror]` enum). While
 | `"EmergencyWithdrawalAlreadyRequested"` | `request_emergency_withdrawal()` | Emergency withdrawal already pending | Complete or cancel existing request first |
 | `"Grace period not elapsed"` | `confirm_emergency_withdrawal()` | Less than 24 hours have elapsed since request | Wait for grace period to complete |
 | `"Insolvency: locked funds exceed collected"` | `withdraw_unallocated_funds()` | Pool accounting is inconsistent | This should never happen; report as bug |
+| `"Crowdfunding token not set"` | `get_crowdfunding_token()` | No token has been configured yet; `set_crowdfunding_token()` has never succeeded | Configure a token with `set_crowdfunding_token()` first |
+
+### Pending Follow-ups
+
+| Panic Message | Function | Follow-up |
+|---------------|----------|-----------|
+| `"Crowdfunding token not set"` | `get_crowdfunding_token()` | Replace the `.expect()` with a typed `ContractError` variant, matching the convention already used by `ContractError::AdminNotSet` (the admin lookup in `set_crowdfunding_token`) and `ContractError::SchoolNotRegistered`. Until that change is made, integrators must match this string. Tracked by issue #1483; the current behaviour is pinned by `test_issue_1483_crowdfunding_token_unset`. |
 
 ---
 

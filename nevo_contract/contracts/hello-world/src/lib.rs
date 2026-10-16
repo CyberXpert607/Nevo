@@ -756,12 +756,11 @@ impl Contract {
 
     /// Get the number of unique donors for a pool.
     pub fn get_donor_count(env: Env, pool_id: u32) -> u32 {
-        // Verify the pool exists first
-        let _pool: Pool = env
-            .storage()
-            .persistent()
-            .get::<_, Pool>(&pool_id)
-            .unwrap_or_else(|| env.panic_with_error(ContractError::PoolNotFound));
+        // Verify the pool exists first (issue #1482: an existence check is
+        // enough here, a full Pool read is not required).
+        if !env.storage().persistent().has(&pool_id) {
+            env.panic_with_error(ContractError::PoolNotFound);
+        }
 
         env.storage()
             .persistent()
@@ -771,12 +770,11 @@ impl Contract {
 
     /// Get the total contribution of a specific donor to a specific pool.
     pub fn get_contribution(env: Env, pool_id: u32, donor: Address) -> u128 {
-        // Verify the pool exists first
-        let _pool: Pool = env
-            .storage()
-            .persistent()
-            .get::<_, Pool>(&pool_id)
-            .unwrap_or_else(|| env.panic_with_error(ContractError::PoolNotFound));
+        // Verify the pool exists first (issue #1482: an existence check is
+        // enough here, a full Pool read is not required).
+        if !env.storage().persistent().has(&pool_id) {
+            env.panic_with_error(ContractError::PoolNotFound);
+        }
 
         env.storage()
             .persistent()
@@ -1831,6 +1829,19 @@ impl Contract {
     }
 
     /// Get the currently configured global crowdfunding token.
+    ///
+    /// # Panics
+    /// - `"Crowdfunding token not set"` if `set_crowdfunding_token` has never
+    ///   succeeded. This is a plain `.expect()` panic, unlike the typed
+    ///   `ContractError::AdminNotSet` used by `set_crowdfunding_token` for its
+    ///   own admin lookup.
+    ///
+    /// Follow-up (issue #1483): replace the `.expect()` with a typed
+    /// `ContractError` variant, consistent with `ContractError::AdminNotSet`
+    /// and `ContractError::SchoolNotRegistered`, and document the new code in
+    /// `nevo_contract/ERRORS.md`. The panic text is locked in by
+    /// `test_issue_1483_crowdfunding_token_unset` so that change has to be
+    /// deliberate.
     pub fn get_crowdfunding_token(env: Env) -> Address {
         let token_key = Symbol::new(&env, CROWDFUNDING_TOKEN_KEY);
         env.storage()
@@ -1868,6 +1879,10 @@ mod test_campaign_lifecycle;
 mod test_contract_initialization;
 mod test_issue_1287_pool_multisig;
 mod test_issue_1319_memory;
+mod test_issue_1482_pool_getter_missing_pool;
+mod test_issue_1483_crowdfunding_token_unset;
+mod test_issue_1484_create_campaign_with_fee;
+mod test_issue_1485_campaign_balance_alias;
 mod test_issue_1487_emergency_withdraw_amount_validation;
 mod test_issues;
 mod test_pool_creation;
