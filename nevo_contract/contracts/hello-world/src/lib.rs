@@ -740,6 +740,20 @@ impl Contract {
             .unwrap_or(0)
     }
 
+    /// Get all campaign (pool) IDs.
+    pub fn get_all_campaigns(env: Env) -> Vec<u32> {
+        let count = Self::get_pool_count(env.clone());
+        let mut list = Vec::new(&env);
+        let mut id = 1u32;
+        while id <= count {
+            if env.storage().persistent().has(&id) {
+                list.push_back(id);
+            }
+            id += 1;
+        }
+        list
+    }
+
     /// Get the number of unique donors for a pool.
     pub fn get_donor_count(env: Env, pool_id: u32) -> u32 {
         // Verify the pool exists first
@@ -1854,6 +1868,7 @@ mod test_campaign_lifecycle;
 mod test_contract_initialization;
 mod test_issue_1287_pool_multisig;
 mod test_issue_1319_memory;
+mod test_issue_1487_emergency_withdraw_amount_validation;
 mod test_issues;
 mod test_pool_creation;
 mod test_pool_retrieval;
