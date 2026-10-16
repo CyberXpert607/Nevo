@@ -38,9 +38,25 @@ jobs:
   server:
     name: Server — Build
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: nevo_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d nevo_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: ./nevo_server
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/nevo_test
     steps:
       - uses: actions/checkout@v4
 
@@ -52,6 +68,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+
+      - name: Test
+        run: npm test -- --runInBand
 
       - name: Build
         run: npm run build
