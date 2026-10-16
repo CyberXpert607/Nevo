@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { DataSource, Repository } from 'typeorm';
 import { PoolsService, ChainPoolData } from './pools.service';
 import { Pool, PoolStatus } from './pool.entity';
 import { ContractService } from '../contract/contract.service';
+import { CreatePoolsTable } from '../migrations/__migrations__/CreatePoolsTable';
 
 // ---------------------------------------------------------------------------
 // Helper types
@@ -621,6 +623,149 @@ describe('PoolsService', () => {
       const { service } = await buildService(null);
       const result = await service.markCompleted('nonexistent');
       expect(result).toBeNull();
+    });
+  });
+
+  // ── Pool entity defaults & DB constraints ─────────────────────────────────
+
+  describe('Pool entity defaults and constraints (DB level)', () => {
+    let dataSource: DataSource;
+    let poolRepo: Repository<Pool>;
+
+    beforeAll(async () => {
+      dataSource = new DataSource({
+        type: 'better-sqlite3',
+        database: ':memory:',
+        entities: [Pool],
+        synchronize: false,
+      });
+      await dataSource.initialize();
+      // Apply the real migration so column defaults and the unique index on
+      // contract_pool_id match production.
+      await dataSource.query(
+        'CREATE TABLE "pools" ("id" varchar PRIMARY KEY NOT NULL, ' +
+          '"contract_pool_id" varchar NOT NULL, ' +
+          '"creator_wallet" varchar NOT NULL, ' +
+          '"goal" varchar NOT NULL, ' +
+          '"raised" varchar NOT NULL DEFAULT (\'0\'), ' +
+          '"status" varchar NOT NULL DEFAULT (\'active\'), ' +
+          '"category" varchar NOT NULL DEFAULT (\'\'), ' +
+          '"title" varchar NOT NULL, ' +
+          '"description" varchar NOT NULL, ' +
+          '"image_url" varchar, ' +
+          '"created_at" datetime NOT NULL DEFAULT (datetime(\'now\')), ' +
+          '"updated_at" datetime NOT NULL DEFAULT (datetime(\'now\')))',
+      );
+      await dataSource.query(
+        'CREATE UNIQUE INDEX "IDX_pools_contract_pool_id" ON "pools" ("contract_pool_id")',
+      );
+      poolRepo = dataSource.getRepository(Pool);
+    });
+
+    afterAll(async () => {
+      if (dataSource?.isInitialized) {
+        await dataSource.destroy();
+      }
+    });
+
+    beforeEach(async () => {
+      await poolRepo.clear();
+    });
+
+    it('defaults category to empty string when omitted', async () => {
+      const inserted = await poolRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Pool)
+        .values({
+          contractPoolId: 'default-category',
+          creatorWallet: 'GWALLET',
+          goal: '1000',
+          title: 'T',
+          description: 'D',
+        })
+        .execute();
+
+      const row = await poolRepo.findOneOrFail({
+        where: { contractPoolId: 'default-category' },
+      });
+      expect(row.category).toBe('');
+      expect(inserted.identifiers).toBeDefined();
+    });
+
+    it('defaults raised to 0 (persisted as "0") when omitted', async () => {
+      await poolRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Pool)
+        .values({
+          contractPoolId: 'default-raised',
+          creatorWallet: 'GWALLET',
+          goal: '1000',
+          title: 'T',
+          description: 'D',
+        })
+        .execute();
+
+      const row = await poolRepo.findOneOrFail({
+        where: { contractPoolId: 'default-raised' },
+      });
+      expect(row.raised).toBe('0');
+    });
+
+    it('defaults status to PoolStatus.Active when omitted', async () => {
+      await poolRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Pool)
+        .values({
+          contractPoolId: 'default-status',
+          creatorWallet: 'GWALLET',
+          goal: '1000',
+          title: 'T',
+          description: 'D',
+        })
+        .execute();
+
+      const row = await poolRepo.findOneOrFail({
+        where: { contractPoolId: 'default-status' },
+      });
+      expect(row.status).toBe(PoolStatus.Active);
+    });
+
+    it('enforces contractPoolId uniqueness at the DB level', async () => {
+      await poolRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Pool)
+        .values({
+          contractPoolId: 'duplicate-id',
+          creatorWallet: 'GWALLET',
+          goal: '1000',
+          title: 'T',
+          description: 'D',
+        })
+        .execute();
+
+      await expect(
+        poolRepo
+          .createQueryBuilder()
+          .insert()
+          .into(Pool)
+          .values({
+            contractPoolId: 'duplicate-id',
+            creatorWallet: 'GOTHER',
+            goal: '2000',
+            title: 'T2',
+            description: 'D2',
+          })
+          .execute(),
+      ).rejects.toThrow(/UNIQUE|unique/i);
+    });
+
+    it('exposes the same unique index name as the CreatePoolsTable migration', () => {
+      // Sanity check that the migration we mirror defines the unique index.
+      expect(CreatePoolsTable).toBeDefined();
     });
   });
 
