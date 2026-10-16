@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { Donation } from './donation.entity.js';
 
 export enum DonationSortBy {
@@ -132,17 +132,33 @@ export class DonationsService {
     amount: string;
     asset: string;
     txHash: string;
-    memo?: string;
+    memo?: string | null;
   }): Promise<Donation> {
-    return this.donationRepo.save(
-      this.donationRepo.create({
-        poolId: data.poolId,
-        donorWallet: data.donorWallet,
-        amount: data.amount,
-        asset: data.asset,
-        txHash: data.txHash,
-        memo: data.memo || null,
-      }),
-    );
+    try {
+      return await this.donationRepo.save(
+        this.donationRepo.create({
+          poolId: data.poolId,
+          donorWallet: data.donorWallet,
+          amount: data.amount,
+          asset: data.asset,
+          txHash: data.txHash,
+          memo: data.memo ?? null,
+        }),
+      );
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        'code' in error.driverError &&
+        error.driverError.code === '23505'
+      ) {
+        const existing = await this.donationRepo.findOneBy({
+          txHash: data.txHash,
+        });
+        if (existing) {
+          return existing;
+        }
+      }
+      throw error;
+    }
   }
 }
