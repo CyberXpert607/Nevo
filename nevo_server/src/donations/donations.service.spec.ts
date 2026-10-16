@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DonationsService, DonationSortBy } from './donations.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Donation } from './donation.entity';
+import { QueryFailedError } from 'typeorm';
 
 describe('DonationsService', () => {
   let service: DonationsService;
@@ -12,6 +13,7 @@ describe('DonationsService', () => {
       find: jest.fn(),
       createQueryBuilder: jest.fn(),
       countBy: jest.fn(),
+      findOneBy: jest.fn(),
       create: jest.fn((data) => data),
       save: jest.fn((entity) => Promise.resolve({ id: 1, ...entity })),
     };
@@ -125,6 +127,20 @@ describe('DonationsService', () => {
       expect(mockRepo.create).toHaveBeenCalledWith({ ...data, memo: null });
       expect(mockRepo.save).toHaveBeenCalledWith({ ...data, memo: null });
       expect(result).toEqual({ id: 1, ...data, memo: null });
+    });
+
+    it('returns the existing donation when the txHash already exists', async () => {
+      const existing = { id: 'existing-id', ...data, memo: null };
+      mockRepo.save
+        .mockResolvedValueOnce(existing)
+        .mockRejectedValueOnce(
+          new QueryFailedError('INSERT INTO donations', [], { code: '23505' }),
+        );
+      mockRepo.findOneBy.mockResolvedValue(existing);
+
+      await expect(service.recordDonation(data)).resolves.toEqual(existing);
+      await expect(service.recordDonation(data)).resolves.toEqual(existing);
+      expect(mockRepo.findOneBy).toHaveBeenCalledWith({ txHash: data.txHash });
     });
   });
 
