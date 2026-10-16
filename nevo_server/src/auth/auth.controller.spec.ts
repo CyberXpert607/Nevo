@@ -4,6 +4,13 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import request from 'supertest';
 import * as StellarSdk from '@stellar/stellar-sdk';
+
+jest.mock('@nestjs/schedule', () => ({
+  Cron: () => () => {},
+  CronExpression: {},
+  ScheduleModule: {},
+  SchedulerRegistry: jest.fn(),
+}));
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { NonceService } from './nonce.service';
@@ -364,4 +371,40 @@ describe('AuthController (challenge/verify)', () => {
       });
     });
   });
+
+  describe('AuthController -> AuthService.generateChallenge dead code proof (Issue #1490)', () => {
+    it('GET /auth/challenge calls NonceService.generateNonce and NEVER calls AuthService.generateChallenge', async () => {
+      const authServiceSpy = jest.spyOn(authService, 'generateChallenge');
+      const nonceServiceSpy = jest
+        .spyOn(nonceService, 'generateNonce')
+        .mockResolvedValue('nonce-service-generated-nonce');
+
+      const response = await request(app.getHttpServer())
+        .get('/auth/challenge')
+        .query({ publicKey })
+        .expect(200);
+
+      expect(response.body).toEqual({ nonce: 'nonce-service-generated-nonce' });
+      // Proves: AuthController delegates to NonceService.generateNonce
+      expect(nonceServiceSpy).toHaveBeenCalledTimes(1);
+      expect(nonceServiceSpy).toHaveBeenCalledWith(publicKey);
+      // Proves: AuthService.generateChallenge is never called (dead/unreachable code)
+      expect(authServiceSpy).not.toHaveBeenCalled();
+    });
+
+    it('direct controller call verifies NonceService is invoked and AuthService.generateChallenge is untouched', async () => {
+      const authServiceSpy = jest.spyOn(authService, 'generateChallenge');
+      const nonceServiceSpy = jest
+        .spyOn(nonceService, 'generateNonce')
+        .mockResolvedValue('direct-call-nonce');
+
+      const controller = app.get<AuthController>(AuthController);
+      const result = await controller.challenge(publicKey);
+
+      expect(result).toEqual({ nonce: 'direct-call-nonce' });
+      expect(nonceServiceSpy).toHaveBeenCalledWith(publicKey);
+      expect(authServiceSpy).not.toHaveBeenCalled();
+    });
+  });
 });
+
