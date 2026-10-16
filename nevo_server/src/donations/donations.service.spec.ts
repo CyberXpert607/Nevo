@@ -129,6 +129,28 @@ describe('DonationsService', () => {
       expect(result).toEqual({ id: 1, ...data, memo: null });
     });
 
+    it('accepts an explicit null memo', async () => {
+      const result = await service.recordDonation({ ...data, memo: null });
+      expect(mockRepo.save).toHaveBeenCalledWith({ ...data, memo: null });
+      expect(result.memo).toBeNull();
+    });
+
+    it('preserves an empty memo distinctly from null', async () => {
+      const emptyMemo = await service.recordDonation({ ...data, memo: '' });
+      const nullMemo = await service.recordDonation({ ...data, memo: null });
+
+      expect(emptyMemo.memo).toBe('');
+      expect(nullMemo.memo).toBeNull();
+    });
+
+    it('round-trips a long memo', async () => {
+      const memo = 'Thank you! '.repeat(1000);
+
+      const result = await service.recordDonation({ ...data, memo });
+
+      expect(result.memo).toBe(memo);
+    });
+
     it('returns the existing donation when the txHash already exists', async () => {
       const existing = { id: 'existing-id', ...data, memo: null };
       mockRepo.save
