@@ -103,6 +103,58 @@ describe('SyncService', () => {
 
       expect(service.getCursor()).toBeNull();
     });
+
+    it('onModuleInit queries findOne with the horizon_cursor key and restores the value', async () => {
+      syncStateRepo.findOne.mockResolvedValue({
+        key: 'horizon_cursor',
+        value: 'restored-cursor',
+      });
+
+      await service.onModuleInit();
+
+      expect(syncStateRepo.findOne).toHaveBeenCalledWith({
+        where: { key: 'horizon_cursor' },
+      });
+      expect(service.getCursor()).toBe('restored-cursor');
+    });
+
+    it('onModuleInit keeps the cursor null when findOne resolves null', async () => {
+      syncStateRepo.findOne.mockResolvedValue(null);
+
+      await service.onModuleInit();
+
+      expect(syncStateRepo.findOne).toHaveBeenCalledWith({
+        where: { key: 'horizon_cursor' },
+      });
+      expect(service.getCursor()).toBeNull();
+    });
+
+    it('onModuleInit does not overwrite an already-set cursor incorrectly', async () => {
+      syncStateRepo.save.mockResolvedValue({
+        key: 'horizon_cursor',
+        value: 'existing-cursor',
+      });
+      await service.saveCursor('existing-cursor');
+
+      syncStateRepo.findOne.mockResolvedValue({
+        key: 'horizon_cursor',
+        value: 'restored-cursor',
+      });
+      await service.onModuleInit();
+
+      expect(service.getCursor()).toBe('restored-cursor');
+    });
+
+    it('onModuleInit ignores a row with a different key', async () => {
+      syncStateRepo.findOne.mockResolvedValue(null);
+
+      await service.onModuleInit();
+
+      expect(syncStateRepo.findOne).toHaveBeenCalledWith({
+        where: { key: 'horizon_cursor' },
+      });
+      expect(service.getCursor()).toBeNull();
+    });
   });
 
   describe('processPoolClosedEvent', () => {
