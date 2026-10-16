@@ -10,6 +10,8 @@ describe('SyncService', () => {
   const upsertFromChain = jest.fn();
   const markCompleted = jest.fn();
   const isTxProcessed = jest.fn();
+  const recordDonation = jest.fn();
+  const incrementRaised = jest.fn();
   const syncStateRepo = { findOne: jest.fn(), save: jest.fn() };
 
   beforeEach(async () => {
@@ -17,7 +19,10 @@ describe('SyncService', () => {
       providers: [
         SyncService,
         { provide: PoolsService, useValue: { upsertFromChain, markCompleted } },
-        { provide: DonationsService, useValue: { isTxProcessed } },
+        {
+          provide: DonationsService,
+          useValue: { isTxProcessed, recordDonation, incrementRaised },
+        },
         { provide: getRepositoryToken(SyncState), useValue: syncStateRepo },
       ],
     }).compile();
@@ -26,6 +31,8 @@ describe('SyncService', () => {
     upsertFromChain.mockReset();
     markCompleted.mockReset();
     isTxProcessed.mockReset().mockResolvedValue(false);
+    recordDonation.mockReset().mockResolvedValue(undefined);
+    incrementRaised.mockReset().mockResolvedValue(undefined);
     syncStateRepo.findOne.mockReset();
     syncStateRepo.save.mockReset();
   });
@@ -200,6 +207,54 @@ describe('SyncService', () => {
 
       expect(isTxProcessed).not.toHaveBeenCalled();
       expect(upsertFromChain).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('processDonationEvent', () => {
+    it('skips when txHash is missing', async () => {
+      const event: HorizonContractEvent = {
+        topic: ['donation', 'pool-1'],
+        value: ['GDONOR', '100'],
+      };
+
+      await service.processDonationEvent(event);
+
+      expect(isTxProcessed).not.toHaveBeenCalled();
+      expect(recordDonation).not.toHaveBeenCalled();
+      expect(incrementRaised).not.toHaveBeenCalled();
+    });
+
+    it('skips when isTxDuplicate returns true', async () => {
+      isTxProcessed.mockResolvedValue(true);
+      const event: HorizonContractEvent = {
+        topic: ['donation', 'pool-1'],
+        value: ['GDONOR', '100'],
+        txHash: 'dup-donation-hash',
+      };
+
+      await service.processDonationEvent(event);
+
+      expect(recordDonation).not.toHaveBeenCalled();
+      expect(incrementRaised).not.toHaveBeenCalled();
+    });
+
+    it('handles a DB-level unique violation gracefully when a race slips past isTxDuplicate', async () => {
+      isTxProcessed.mockResolvedValue(false);
+      const uniqueViolation = Object.assign(
+        new Error('duplicate key value violates unique constraint'),
+        { code: '23505' },
+      );
+      recordDonation.mockRejectedValue(uniqueViolation);
+      const event: HorizonContractEvent = {
+        topic: ['donation', 'pool-1'],
+        value: ['GDONOR', '100'],
+        txHash: 'race-hash',
+      };
+
+      await expect(service.processDonationEvent(event)).resolves.not.toThrow();
+
+      expect(recordDonation).toHaveBeenCalledTimes(1);
+      expect(incrementRaised).not.toHaveBeenCalled();
     });
   });
 });
