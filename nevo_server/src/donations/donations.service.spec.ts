@@ -142,5 +142,41 @@ describe('DonationsService', () => {
       expect(result).toBe(false);
       expect(mockRepo.countBy).toHaveBeenCalledWith({ txHash: 'tx456' });
     });
+
+    it('returns true for an already-inserted hash', async () => {
+      mockRepo.countBy.mockResolvedValue(1);
+      const result = await service.isTxProcessed('already-inserted-hash');
+      expect(result).toBe(true);
+      expect(mockRepo.countBy).toHaveBeenCalledWith({ txHash: 'already-inserted-hash' });
+    });
+  });
+
+  describe('txHash uniqueness', () => {
+    it('declares a unique index on txHash at the entity level', () => {
+      const indices = (Reflect.getMetadata('indices', Donation) as any[]) || [];
+      const uniqueTxHashIndex = indices.find(
+        (index) => index.unique && index.columns && index.columns.includes('txHash'),
+      );
+      expect(uniqueTxHashIndex).toBeDefined();
+      expect(uniqueTxHashIndex.unique).toBe(true);
+    });
+
+    it('propagates a Postgres unique-violation error from recordDonation', async () => {
+      const uniqueViolation = Object.assign(
+        new Error('duplicate key value violates unique constraint "IDX_tx_hash"'),
+        { code: '23505', constraint: 'IDX_tx_hash' },
+      );
+      mockRepo.save.mockRejectedValueOnce(uniqueViolation);
+
+      await expect(
+        service.recordDonation({
+          poolId: '1',
+          donorWallet: 'GDONOR',
+          amount: '100',
+          asset: 'XLM',
+          txHash: 'duplicate-hash',
+        }),
+      ).rejects.toMatchObject({ code: '23505' });
+    });
   });
 });
