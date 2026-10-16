@@ -667,6 +667,50 @@ describe('PoolsService', () => {
       });
       expect(result).toBeNull();
     });
+
+    it('resolves to null (no unhandled rejection) for a non-existent contractPoolId', async () => {
+      const { service, repo } = await buildService(null);
+
+      await expect(
+        service.incrementRaised('does-not-exist', '100'),
+      ).resolves.toBeNull();
+
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('accumulates correctly across sequential increments', async () => {
+      const existing = makePool({ raised: '0' });
+      const { service, savedArg } = await buildService(existing);
+
+      await service.incrementRaised('1', '100');
+      await service.incrementRaised('1', '200');
+      const result = await service.incrementRaised('1', '300');
+
+      expect(savedArg().raised).toBe('600');
+      expect(result?.raised).toBe('600');
+    });
+
+    it('loses an update when two concurrent increments read the same stale entity (read-then-write)', async () => {
+      // The implementation is read-then-write: it does findOne() and then
+      // save(). When two calls run concurrently and the repository returns the
+      // same stale entity instance, both compute their new value from the same
+      // starting `raised`, so one increment is lost. This test documents that
+      // known limitation (an atomic SQL increment would be required to fix it).
+      const existing = makePool({ raised: '1000' });
+      const { service, savedArg } = await buildService(existing);
+
+      const [first, second] = await Promise.all([
+        service.incrementRaised('1', '500'),
+        service.incrementRaised('1', '500'),
+      ]);
+
+      // Both calls resolve, but they share the same entity instance and the
+      // second write clobbers the first: 1000 + 500 = 1500, not 2000.
+      expect(first).not.toBeNull();
+      expect(second).not.toBeNull();
+      expect(savedArg().raised).toBe('1500');
+      expect(savedArg().raised).not.toBe('2000');
+    });
   });
 });
 
