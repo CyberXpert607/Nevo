@@ -1304,3 +1304,11 @@ impl Contract {
 
 mod test;
 mod test_issues;
+mod test_auth_bypass;
+mod test_numeric_overflow;
+mod test_timestamp_edge_cases;
+mod test_token_transfer_errors;
+mod test_get_total_raised;
+mod test_is_school_registered;
+mod test_get_school_metadata;
+mod test_create_pool_for_school;
