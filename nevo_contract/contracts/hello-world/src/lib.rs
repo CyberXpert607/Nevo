@@ -851,6 +851,17 @@ impl Contract {
     }
 
     /// School approves or rejects a student's application.
+    ///
+    /// Requires authorization from `school` (`school.require_auth()`), and
+    /// `school` must be the school linked to the pool. Sets the application
+    /// status to approved or rejected according to `approved` and emits an
+    /// `app_aprvd` event.
+    ///
+    /// # Panics
+    /// - `ContractError::OnlyLinkedSchoolCanApprove` if `school` is not the
+    ///   school linked to the pool
+    /// - `ContractError::StudentHasNotApplied` if the student never applied
+    ///   to the pool
     pub fn approve_application(
         env: Env,
         pool_id: u32,
@@ -1338,7 +1349,7 @@ impl Contract {
     /// Emits a `creation_fee_updated` event on success.
     ///
     /// # Panics
-    /// - `"Admin not set"` if no admin has been configured
+    /// - `ContractError::AdminNotSet` if no admin has been configured
     /// - `"Unauthorized admin"` if `admin` does not match the stored admin
     /// - `"InvalidFee"` if `fee` is negative
     /// A negative fee panics with `ContractError::InvalidFee`.
