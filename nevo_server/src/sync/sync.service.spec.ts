@@ -12,7 +12,6 @@ describe('SyncService', () => {
   const incrementRaised = jest.fn();
   const isTxProcessed = jest.fn();
   const recordDonation = jest.fn();
-  const incrementRaised = jest.fn();
   const syncStateRepo = { findOne: jest.fn(), save: jest.fn() };
 
   beforeEach(async () => {
@@ -23,11 +22,9 @@ describe('SyncService', () => {
           provide: PoolsService,
           useValue: { upsertFromChain, markCompleted, incrementRaised },
         },
-        { provide: DonationsService, useValue: { isTxProcessed, recordDonation } },
-        { provide: PoolsService, useValue: { upsertFromChain, markCompleted } },
         {
           provide: DonationsService,
-          useValue: { isTxProcessed, recordDonation, incrementRaised },
+          useValue: { isTxProcessed, recordDonation },
         },
         { provide: getRepositoryToken(SyncState), useValue: syncStateRepo },
       ],
@@ -35,12 +32,10 @@ describe('SyncService', () => {
 
     service = module.get(SyncService);
     upsertFromChain.mockReset();
-    markCompleted.mockReset();
-    incrementRaised.mockReset();
-    isTxProcessed.mockReset().mockResolvedValue(false);
-    recordDonation.mockReset();
-    recordDonation.mockReset().mockResolvedValue(undefined);
+    markCompleted.mockReset().mockResolvedValue(undefined);
     incrementRaised.mockReset().mockResolvedValue(undefined);
+    isTxProcessed.mockReset().mockResolvedValue(false);
+    recordDonation.mockReset().mockResolvedValue(undefined);
     syncStateRepo.findOne.mockReset();
     syncStateRepo.save.mockReset();
   });
@@ -329,6 +324,68 @@ describe('SyncService', () => {
 
       expect(markCompleted).toHaveBeenCalledTimes(1);
       expect(markCompleted).toHaveBeenCalledWith('pool-7');
+    });
+
+    it('calls PoolsService.markCompleted with topic[1] as contractPoolId', async () => {
+      const event: HorizonContractEvent = {
+        topic: ['pool_clos', 'pool-closed-42'],
+        value: [],
+        txHash: 'tx-close-42',
+      };
+
+      await service.processPoolClosedEvent(event);
+
+      expect(isTxProcessed).toHaveBeenCalledWith('tx-close-42');
+      expect(markCompleted).toHaveBeenCalledTimes(1);
+      expect(markCompleted).toHaveBeenCalledWith('pool-closed-42');
+    });
+
+    it('short-circuits on a duplicate txHash already seen in-run before calling markCompleted', async () => {
+      const loggerWarnSpy = jest
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        .spyOn((service as any).logger, 'warn')
+        .mockImplementation(() => {});
+      const event: HorizonContractEvent = {
+        topic: ['pool_clos', 'pool-dup-close'],
+        value: [],
+        txHash: 'dup-close-hash',
+      };
+
+      await service.processPoolClosedEvent(event);
+      await service.processPoolClosedEvent(event);
+
+      expect(loggerWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('dup-close-hash'),
+      );
+      expect(markCompleted).toHaveBeenCalledTimes(1);
+      expect(markCompleted).toHaveBeenCalledWith('pool-dup-close');
+    });
+
+    it('short-circuits on a duplicate txHash already processed in DB before calling markCompleted', async () => {
+      isTxProcessed.mockResolvedValue(true);
+      const event: HorizonContractEvent = {
+        topic: ['pool_clos', 'pool-dbdup-close'],
+        value: [],
+        txHash: 'db-dup-close-hash',
+      };
+
+      await service.processPoolClosedEvent(event);
+
+      expect(isTxProcessed).toHaveBeenCalledWith('db-dup-close-hash');
+      expect(markCompleted).not.toHaveBeenCalled();
+    });
+
+    it('processes an event with no txHash (duplicate check skipped)', async () => {
+      const event: HorizonContractEvent = {
+        topic: ['pool_clos', 'pool-notx-close'],
+        value: [],
+      };
+
+      await service.processPoolClosedEvent(event);
+
+      expect(isTxProcessed).not.toHaveBeenCalled();
+      expect(markCompleted).toHaveBeenCalledTimes(1);
+      expect(markCompleted).toHaveBeenCalledWith('pool-notx-close');
     });
   });
 
