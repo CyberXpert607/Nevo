@@ -759,6 +759,20 @@ impl Contract {
         );
     }
 
+    /// Return campaign ids in creation order.
+    pub fn get_all_campaigns(env: Env) -> Vec<u32> {
+        let count = Self::get_pool_count(env.clone());
+        let mut campaigns = Vec::new(&env);
+        let mut id = 1u32;
+        while id <= count {
+            if env.storage().persistent().has(&id) {
+                campaigns.push_back(id);
+            }
+            id += 1;
+        }
+        campaigns
+    }
+
     /// Get the total number of pools.
     pub fn get_pool_count(env: Env) -> u32 {
         let pool_count_key = Symbol::new(&env, POOL_COUNT);
