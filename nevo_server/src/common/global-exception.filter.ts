@@ -23,6 +23,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       getRequestId() ??
       (request.headers['x-request-id'] as string) ??
       'unknown';
+    const requestId = getRequestId() || (request.headers['x-request-id'] as string) || 'unknown';
 
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'An internal error occurred';
@@ -50,6 +51,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       error = 'Internal Server Error';
     } else {
       this.logger.error(`[${requestId}] Unhandled exception: ${String(exception)}`);
+      message = 'An internal error occurred';
+      error = 'Internal Server Error';
     }
 
     response.status(statusCode).json({
