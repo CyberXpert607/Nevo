@@ -18,7 +18,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
-    const requestId = getRequestId();
+    const requestId = getRequestId() || (request.headers['x-request-id'] as string) || 'unknown';
 
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'Internal server error';
@@ -40,10 +40,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         `[${requestId}] Unhandled exception: ${exception.message}`,
         exception.stack,
       );
-      message = exception.message || 'Internal server error';
-      error = exception.name || 'Internal Server Error';
+      // Mask sensitive error details from client response
+      message = 'An internal error occurred';
+      error = 'Internal Server Error';
     } else {
       this.logger.error(`[${requestId}] Unhandled exception: ${String(exception)}`);
+      message = 'An internal error occurred';
+      error = 'Internal Server Error';
     }
 
     response.status(statusCode).json({
