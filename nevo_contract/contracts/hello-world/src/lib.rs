@@ -1985,6 +1985,7 @@ mod test_campaign_lifecycle;
 mod test_contract_initialization;
 mod test_issue_1287_pool_multisig;
 mod test_issue_1319_memory;
+mod test_issue_1478_campaign_enumeration;
 mod test_issue_1477_pool_school_relationship;
 mod test_issue_1467_create_pool_validation_panics;
 mod test_issue_1469_milestone_setup_panics;
