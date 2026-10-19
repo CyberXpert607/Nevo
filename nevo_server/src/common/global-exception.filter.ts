@@ -40,10 +40,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         `[${requestId}] Unhandled exception: ${exception.message}`,
         exception.stack,
       );
-      message = exception.message || 'Internal server error';
-      error = exception.name || 'Internal Server Error';
+      // Mask sensitive error details from client response
+      message = 'An internal error occurred';
+      error = 'Internal Server Error';
     } else {
       this.logger.error(`[${requestId}] Unhandled exception: ${String(exception)}`);
+      message = 'An internal error occurred';
+      error = 'Internal Server Error';
     }
 
     response.status(statusCode).json({
