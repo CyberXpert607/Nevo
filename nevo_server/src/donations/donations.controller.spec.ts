@@ -131,6 +131,17 @@ describe('DonationsController (unit)', () => {
       );
     });
 
+    it('falls back to "newest" for an unrecognised sortBy', async () => {
+      const req = { user: { publicKey: 'GABC123' } } as any;
+      await controller.findMyDonations(req, { sortBy: 'unknown' as any });
+      expect(service.findByDonor).toHaveBeenCalledWith(
+        'GABC123',
+        DonationSortBy.newest,
+        undefined,
+        undefined,
+      );
+    });
+
     it('forwards pagination params to the service', async () => {
       const req = { user: { publicKey: 'GABC123' } } as any;
       await controller.findMyDonations(req, { page: 3, limit: 10 });
@@ -368,6 +379,20 @@ describe('DonationsController (ValidationPipe)', () => {
       .expect(400);
 
     expect(donationsService.findByPool).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for an unknown sortBy value on the authenticated donations route', async () => {
+    const token = new JwtService({
+      secret: process.env.JWT_SECRET ?? JWT_SECRET_FALLBACK,
+    }).sign({ sub: 'GABC123' });
+
+    await request(app.getHttpServer())
+      .get('/users/me/donations')
+      .set('Authorization', `Bearer ${token}`)
+      .query({ sortBy: 'oldest' })
+      .expect(400);
+
+    expect(donationsService.findByDonor).not.toHaveBeenCalled();
   });
 
   it('returns 400 for an unknown query param', async () => {

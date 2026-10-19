@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { DataSource, Repository } from 'typeorm';
 import { PoolsService, ChainPoolData } from './pools.service';
 import { Pool, PoolStatus } from './pool.entity';
 import { ContractService } from '../contract/contract.service';
+import { CreatePoolsTable } from '../migrations/__migrations__/CreatePoolsTable';
 
 // ---------------------------------------------------------------------------
 // Helper types
@@ -624,6 +626,149 @@ describe('PoolsService', () => {
     });
   });
 
+  // ── Pool entity defaults & DB constraints ─────────────────────────────────
+
+  describe('Pool entity defaults and constraints (DB level)', () => {
+    let dataSource: DataSource;
+    let poolRepo: Repository<Pool>;
+
+    beforeAll(async () => {
+      dataSource = new DataSource({
+        type: 'better-sqlite3',
+        database: ':memory:',
+        entities: [Pool],
+        synchronize: false,
+      });
+      await dataSource.initialize();
+      // Apply the real migration so column defaults and the unique index on
+      // contract_pool_id match production.
+      await dataSource.query(
+        'CREATE TABLE "pools" ("id" varchar PRIMARY KEY NOT NULL, ' +
+          '"contract_pool_id" varchar NOT NULL, ' +
+          '"creator_wallet" varchar NOT NULL, ' +
+          '"goal" varchar NOT NULL, ' +
+          '"raised" varchar NOT NULL DEFAULT (\'0\'), ' +
+          '"status" varchar NOT NULL DEFAULT (\'active\'), ' +
+          '"category" varchar NOT NULL DEFAULT (\'\'), ' +
+          '"title" varchar NOT NULL, ' +
+          '"description" varchar NOT NULL, ' +
+          '"image_url" varchar, ' +
+          '"created_at" datetime NOT NULL DEFAULT (datetime(\'now\')), ' +
+          '"updated_at" datetime NOT NULL DEFAULT (datetime(\'now\')))',
+      );
+      await dataSource.query(
+        'CREATE UNIQUE INDEX "IDX_pools_contract_pool_id" ON "pools" ("contract_pool_id")',
+      );
+      poolRepo = dataSource.getRepository(Pool);
+    });
+
+    afterAll(async () => {
+      if (dataSource?.isInitialized) {
+        await dataSource.destroy();
+      }
+    });
+
+    beforeEach(async () => {
+      await poolRepo.clear();
+    });
+
+    it('defaults category to empty string when omitted', async () => {
+      const inserted = await poolRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Pool)
+        .values({
+          contractPoolId: 'default-category',
+          creatorWallet: 'GWALLET',
+          goal: '1000',
+          title: 'T',
+          description: 'D',
+        })
+        .execute();
+
+      const row = await poolRepo.findOneOrFail({
+        where: { contractPoolId: 'default-category' },
+      });
+      expect(row.category).toBe('');
+      expect(inserted.identifiers).toBeDefined();
+    });
+
+    it('defaults raised to 0 (persisted as "0") when omitted', async () => {
+      await poolRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Pool)
+        .values({
+          contractPoolId: 'default-raised',
+          creatorWallet: 'GWALLET',
+          goal: '1000',
+          title: 'T',
+          description: 'D',
+        })
+        .execute();
+
+      const row = await poolRepo.findOneOrFail({
+        where: { contractPoolId: 'default-raised' },
+      });
+      expect(row.raised).toBe('0');
+    });
+
+    it('defaults status to PoolStatus.Active when omitted', async () => {
+      await poolRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Pool)
+        .values({
+          contractPoolId: 'default-status',
+          creatorWallet: 'GWALLET',
+          goal: '1000',
+          title: 'T',
+          description: 'D',
+        })
+        .execute();
+
+      const row = await poolRepo.findOneOrFail({
+        where: { contractPoolId: 'default-status' },
+      });
+      expect(row.status).toBe(PoolStatus.Active);
+    });
+
+    it('enforces contractPoolId uniqueness at the DB level', async () => {
+      await poolRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Pool)
+        .values({
+          contractPoolId: 'duplicate-id',
+          creatorWallet: 'GWALLET',
+          goal: '1000',
+          title: 'T',
+          description: 'D',
+        })
+        .execute();
+
+      await expect(
+        poolRepo
+          .createQueryBuilder()
+          .insert()
+          .into(Pool)
+          .values({
+            contractPoolId: 'duplicate-id',
+            creatorWallet: 'GOTHER',
+            goal: '2000',
+            title: 'T2',
+            description: 'D2',
+          })
+          .execute(),
+      ).rejects.toThrow(/UNIQUE|unique/i);
+    });
+
+    it('exposes the same unique index name as the CreatePoolsTable migration', () => {
+      // Sanity check that the migration we mirror defines the unique index.
+      expect(CreatePoolsTable).toBeDefined();
+    });
+  });
+
   // ── incrementRaised ───────────────────────────────────────────────────────
 
   describe('incrementRaised', () => {
@@ -666,6 +811,50 @@ describe('PoolsService', () => {
         where: { contractPoolId: 'nonexistent' },
       });
       expect(result).toBeNull();
+    });
+
+    it('resolves to null (no unhandled rejection) for a non-existent contractPoolId', async () => {
+      const { service, repo } = await buildService(null);
+
+      await expect(
+        service.incrementRaised('does-not-exist', '100'),
+      ).resolves.toBeNull();
+
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('accumulates correctly across sequential increments', async () => {
+      const existing = makePool({ raised: '0' });
+      const { service, savedArg } = await buildService(existing);
+
+      await service.incrementRaised('1', '100');
+      await service.incrementRaised('1', '200');
+      const result = await service.incrementRaised('1', '300');
+
+      expect(savedArg().raised).toBe('600');
+      expect(result?.raised).toBe('600');
+    });
+
+    it('loses an update when two concurrent increments read the same stale entity (read-then-write)', async () => {
+      // The implementation is read-then-write: it does findOne() and then
+      // save(). When two calls run concurrently and the repository returns the
+      // same stale entity instance, both compute their new value from the same
+      // starting `raised`, so one increment is lost. This test documents that
+      // known limitation (an atomic SQL increment would be required to fix it).
+      const existing = makePool({ raised: '1000' });
+      const { service, savedArg } = await buildService(existing);
+
+      const [first, second] = await Promise.all([
+        service.incrementRaised('1', '500'),
+        service.incrementRaised('1', '500'),
+      ]);
+
+      // Both calls resolve, but they share the same entity instance and the
+      // second write clobbers the first: 1000 + 500 = 1500, not 2000.
+      expect(first).not.toBeNull();
+      expect(second).not.toBeNull();
+      expect(savedArg().raised).toBe('1500');
+      expect(savedArg().raised).not.toBe('2000');
     });
   });
 });

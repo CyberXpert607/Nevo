@@ -190,6 +190,35 @@ describe('CreatePoolDto (POST /pools body contract)', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('rejects a leading-zero goal ("01") with 400', async () => {
+    await request(app.getHttpServer())
+      .post('/pools')
+      .send({ ...validBody, goal: '01' })
+      .expect(400);
+
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a leading-zero goal ("007") with 400', async () => {
+    await request(app.getHttpServer())
+      .post('/pools')
+      .send({ ...validBody, goal: '007' })
+      .expect(400);
+
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('accepts a goal beyond Number.MAX_SAFE_INTEGER (string/regex validated)', async () => {
+    const body = {
+      ...validBody,
+      goal: '99999999999999999999999999',
+    };
+
+    await request(app.getHttpServer()).post('/pools').send(body).expect(201);
+
+    expect(create).toHaveBeenCalledWith(body);
+  });
+
   it('rejects a negative goal with 400', async () => {
     await request(app.getHttpServer())
       .post('/pools')

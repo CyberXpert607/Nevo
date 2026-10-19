@@ -49,7 +49,22 @@ export class SyncService implements OnModuleInit {
     await this.syncStateRepo.save({ key: 'horizon_cursor', value: cursor });
   }
 
-  // TODO: replace with real implementation once HorizonService (#46) is available
+  /**
+   * **Unimplemented stub — not a tested feature.**
+   *
+   * This method is a placeholder and does NOT perform any real Horizon polling.
+   * It currently only clears the within-run duplicate-detection set (`seenInRun`)
+   * and never calls `HorizonService`. No events are fetched, processed, or persisted.
+   *
+   * It is intentionally scoped separately from test-coverage work: because there is
+   * no real polling behavior yet, no tests should assert on it. Contributors should
+   * not write tests against this method's (non-existent) polling behavior.
+   *
+   * TODO: replace with a real implementation once HorizonService (#46) is available.
+   * The real implementation must call `HorizonService.fetchContractEvents()` (using
+   * `currentCursor`), dispatch events to the appropriate `process*Event` handlers,
+   * and advance/persist the cursor via `saveCursor()`.
+   */
   @Cron(CronExpression.EVERY_MINUTE)
   async pollHorizonEvents(): Promise<void> {
     this.seenInRun.clear();
