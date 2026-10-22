@@ -2022,6 +2022,7 @@ mod test_create_pool_for_school;
 mod test_pool_creation;
 mod test_pool_retrieval;
 mod test_register_school;
+mod test_issue_1455;
 mod test_withdraw;
 mod test_timestamp_edge_cases;
 mod test_token_transfer_errors;
