@@ -156,6 +156,8 @@ pub enum ContractError {
     InvalidAmount = 20,
     /// Token address does not match the pool's configured token.
     TokenTransferFailed = 21,
+    /// Token address is invalid (e.g., contract's own address).
+    InvalidTokenAddress = 24,
 }
 
 // Helper functions for timestamp/deadline edge-case tests
@@ -759,6 +761,7 @@ impl Contract {
 
         let updated_pool = Pool {
             is_closed: true,
+            state: PoolState::Closed,
             ..pool
         };
 
@@ -1500,13 +1503,13 @@ impl Contract {
     /// - `"Error(Auth, InvalidAction)"` if caller is not the pool sponsor
     /// - `"Deadline must be in the future"` if deadline <= current ledger
     pub fn set_pool_deadline(env: Env, pool_id: u32, deadline: u32) {
-        let pool: Pool = env
+        let _pool: Pool = env
             .storage()
             .persistent()
             .get::<_, Pool>(&pool_id)
             .unwrap_or_else(|| env.panic_with_error(ContractError::PoolNotFound));
 
-        pool.sponsor.require_auth();
+        _pool.sponsor.require_auth();
 
         if deadline <= env.ledger().sequence() {
             panic!("Deadline must be in the future");
@@ -1517,7 +1520,7 @@ impl Contract {
 
         // Issue #954: emit deadline-set event
         env.events()
-            .publish((DEADLINE_SET, pool_id), (pool.sponsor.clone(), deadline));
+            .publish((DEADLINE_SET, pool_id), (_pool.sponsor.clone(), deadline));
     }
 
     /// Get the refund deadline ledger for a pool.
@@ -1927,7 +1930,7 @@ impl Contract {
         }
 
         if token == env.current_contract_address() {
-            panic!("InvalidTokenAddress");
+            env.panic_with_error(ContractError::InvalidTokenAddress);
         }
 
         let token_key = Symbol::new(&env, CROWDFUNDING_TOKEN_KEY);
@@ -1998,6 +2001,7 @@ mod test_issue_1467_create_pool_validation_panics;
 mod test_issue_1469_milestone_setup_panics;
 mod test_issue_1470_get_pool_omits_state;
 mod test_issue_1472_application_index_bounds;
+mod test_issue_1473_get_application_claimed_amount_consistency;
 mod test_issue_1482_pool_getter_missing_pool;
 mod test_issue_1483_crowdfunding_token_unset;
 mod test_issue_1484_create_campaign_with_fee;
