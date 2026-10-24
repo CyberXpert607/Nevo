@@ -130,32 +130,36 @@ pub enum ContractError {
     NoContributionToRefund = 13,
     /// School address has not been registered by an admin.
     SchoolNotRegistered = 14,
+    /// Pool has no linked school.
+    PoolHasNoLinkedSchool = 15,
     /// Pool has already been closed and cannot be closed again.
-    PoolAlreadyClosed = 15,
+    PoolAlreadyClosed = 16,
     /// Pool title/name is empty.
-    InvalidPoolName = 16,
+    InvalidPoolName = 17,
     /// Pool funding goal is zero.
-    InvalidPoolTarget = 17,
+    InvalidPoolTarget = 18,
     /// Pool application deadline is zero or already in the past.
-    InvalidPoolDeadline = 18,
+    InvalidPoolDeadline = 19,
     /// Donation attempted at or after the pool's application deadline.
-    CampaignExpired = 19,
+    CampaignExpired = 20,
     /// No emergency withdrawal request exists for the pool.
-    EmergencyWithdrawalNotRequested = 20,
+    EmergencyWithdrawalNotRequested = 21,
     /// Emergency withdrawal grace period has not yet elapsed.
-    GracePeriodNotElapsed = 21,
+    GracePeriodNotElapsed = 22,
     /// Claim amount is zero or negative.
-    InvalidClaimAmount = 20,
+    InvalidClaimAmount = 23,
     /// Student has no application status record for this pool.
-    ApplicationStatusNotFound = 21,
+    ApplicationStatusNotFound = 24,
     /// Application status is not "Approved", so funds cannot be claimed.
-    ApplicationNotApproved = 22,
+    ApplicationNotApproved = 25,
     /// Claim would exceed the collected funds available to the pool.
-    OverdrawAttempt = 23,
+    OverdrawAttempt = 26,
     /// Donation amount must be positive (greater than zero).
-    InvalidAmount = 20,
+    InvalidAmount = 27,
     /// Token address does not match the pool's configured token.
     TokenTransferFailed = 21,
+    /// Token address is invalid (e.g., contract's own address).
+    InvalidTokenAddress = 24,
 }
 
 // Helper functions for timestamp/deadline edge-case tests
@@ -265,11 +269,17 @@ pub enum PoolState {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pool {
+    /// The sponsor address that created and owns this pool.
     pub sponsor: Address,
+    /// The funding goal amount for this pool.
     pub goal: u128,
+    /// Total amount of funds collected so far through donations.
     pub collected: u128,
+    /// Whether the pool has been permanently closed.
     pub is_closed: bool,
+    /// Current state of the pool in its lifecycle (Active, Paused, Completed, Cancelled, Disbursed, Closed).
     pub state: PoolState,
+    /// Ledger timestamp after which student applications are no longer accepted.
     pub application_deadline: u64,
     /// Ledger timestamp of the most recent contribution to this pool.
     /// Zero until the pool receives its first donation.
@@ -579,7 +589,7 @@ impl Contract {
         env.storage()
             .persistent()
             .get::<_, Address>(&pool_school_key)
-            .expect("Pool school not set")
+            .unwrap_or_else(|| env.panic_with_error(ContractError::PoolHasNoLinkedSchool))
     }
 
     /// Donate to an existing pool.
@@ -759,6 +769,7 @@ impl Contract {
 
         let updated_pool = Pool {
             is_closed: true,
+            state: PoolState::Closed,
             ..pool
         };
 
@@ -833,6 +844,15 @@ impl Contract {
         env.storage()
             .persistent()
             .get::<_, u128>(&(pool_id, "contribution", &donor))
+            .unwrap_or(0)
+    }
+
+    /// Get the number of applications submitted to a pool.
+    pub fn get_application_count(env: Env, pool_id: u32) -> u32 {
+        let count_key = (Symbol::new(&env, APPLICATION_COUNT_PREFIX), pool_id);
+        env.storage()
+            .persistent()
+            .get::<_, u32>(&count_key)
             .unwrap_or(0)
     }
 
@@ -1435,9 +1455,8 @@ impl Contract {
     ///
     /// Only the stored admin may call this function.
     /// A fee of zero is valid (disables the creation fee).
-    /// A negative fee panics with `"InvalidFee"`.
     ///
-    /// Emits a `FEE_UPDATED` event on success.
+    /// Emits exactly one `fee_upd` (`FEE_UPDATED`) event on success.
     ///
     /// # Panics
     /// - `ContractError::AdminNotSet` if no admin has been configured
@@ -1463,7 +1482,7 @@ impl Contract {
         let fee_key = Symbol::new(&env, CREATION_FEE_KEY);
         env.storage().persistent().set(&fee_key, &fee);
 
-               // Issue #954 / #1461: FEE_UPDATED is the canonical topic.
+        // Issue #1461: FEE_UPDATED is the canonical topic; emit it once only.
         env.events().publish((FEE_UPDATED,), fee);
     }
 
@@ -1489,13 +1508,13 @@ impl Contract {
     /// - `"Error(Auth, InvalidAction)"` if caller is not the pool sponsor
     /// - `"Deadline must be in the future"` if deadline <= current ledger
     pub fn set_pool_deadline(env: Env, pool_id: u32, deadline: u32) {
-        let pool: Pool = env
+        let _pool: Pool = env
             .storage()
             .persistent()
             .get::<_, Pool>(&pool_id)
             .unwrap_or_else(|| env.panic_with_error(ContractError::PoolNotFound));
 
-        pool.sponsor.require_auth();
+        _pool.sponsor.require_auth();
 
         if deadline <= env.ledger().sequence() {
             panic!("Deadline must be in the future");
@@ -1506,7 +1525,7 @@ impl Contract {
 
         // Issue #954: emit deadline-set event
         env.events()
-            .publish((DEADLINE_SET, pool_id), (pool.sponsor.clone(), deadline));
+            .publish((DEADLINE_SET, pool_id), (_pool.sponsor.clone(), deadline));
     }
 
     /// Get the refund deadline ledger for a pool.
@@ -1916,7 +1935,7 @@ impl Contract {
         }
 
         if token == env.current_contract_address() {
-            panic!("InvalidTokenAddress");
+            env.panic_with_error(ContractError::InvalidTokenAddress);
         }
 
         let token_key = Symbol::new(&env, CROWDFUNDING_TOKEN_KEY);
@@ -1973,6 +1992,16 @@ impl Contract {
     pub fn get_emergency_grace_period_secs(_env: Env) -> u64 {
         GRACE_PERIOD_SECS
     }
+
+    /// Return the maximum allowed length for pool descriptions.
+    ///
+    /// This corresponds to the compile-time constant `MAX_DESCRIPTION_LENGTH`
+    /// (currently 500 bytes). Off-chain integrators should call this getter
+    /// rather than hard-coding the value so they remain correct if the constant
+    /// is ever updated.
+    pub fn get_max_description_length(_env: Env) -> u32 {
+        MAX_DESCRIPTION_LENGTH as u32
+    }
 }
 
 mod test;
@@ -1987,11 +2016,13 @@ mod test_issue_1467_create_pool_validation_panics;
 mod test_issue_1469_milestone_setup_panics;
 mod test_issue_1470_get_pool_omits_state;
 mod test_issue_1472_application_index_bounds;
+mod test_issue_1473_get_application_claimed_amount_consistency;
 mod test_issue_1482_pool_getter_missing_pool;
 mod test_issue_1483_crowdfunding_token_unset;
 mod test_issue_1484_create_campaign_with_fee;
 mod test_issue_1485_campaign_balance_alias;
 mod test_issue_1487_emergency_withdraw_amount_validation;
+mod test_get_max_description_length;
 mod test_issues;
 mod test_auth_bypass;
 mod test_numeric_overflow;
@@ -2004,6 +2035,7 @@ mod test_create_pool_for_school;
 mod test_pool_creation;
 mod test_pool_retrieval;
 mod test_register_school;
+mod test_issue_1455;
 mod test_withdraw;
 mod test_timestamp_edge_cases;
 mod test_token_transfer_errors;
