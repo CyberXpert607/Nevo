@@ -1437,14 +1437,6 @@ impl Contract {
     /// A fee of zero is valid (disables the creation fee).
     /// A negative fee panics with `"InvalidFee"`.
     ///
-    /// Emits a `creation_fee_updated` event on success.
-    ///
-    /// # Panics
-    /// - `ContractError::AdminNotSet` if no admin has been configured
-    /// - `"Unauthorized admin"` if `admin` does not match the stored admin
-    /// - `"InvalidFee"` if `fee` is negative
-    /// A negative fee panics with `ContractError::InvalidFee`.
-    ///
     /// Emits a `FEE_UPDATED` event on success.
     ///
     /// # Panics
@@ -1471,11 +1463,8 @@ impl Contract {
         let fee_key = Symbol::new(&env, CREATION_FEE_KEY);
         env.storage().persistent().set(&fee_key, &fee);
 
-        // Issue #954: use shared FEE_UPDATED constant instead of inline Symbol::new
+               // Issue #954 / #1461: FEE_UPDATED is the canonical topic.
         env.events().publish((FEE_UPDATED,), fee);
-        // Emit event: topics = ["creation_fee_updated"], data = new fee value
-        env.events()
-            .publish((Symbol::new(&env, "creation_fee_updated"),), fee);
     }
 
     /// Get the current pool creation fee.
